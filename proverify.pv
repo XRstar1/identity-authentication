@@ -1,0 +1,177 @@
+type element. (*element in finite field or group*)
+type attribute.
+   
+free Sec:channel [private].		(*secure channel*)
+free Pub:channel.			(*public channel*)
+
+
+(*-------Names & Variables-------*)
+(*elements of cyclic group*)
+const g:element.
+const h2:element.
+
+
+free W:element.
+
+(*2. UserA & attributes & Each user contains four attributes *)
+free MA:bitstring.
+free WA:bitstring.
+free deltaA1:attribute.
+free deltaA2:attribute.
+free deltaA3:attribute.
+
+
+(*3. UserB & attributes*)
+free MB:bitstring.
+free WB:bitstring.
+free deltaB1:attribute.
+free deltaB2:attribute.
+free deltaB3:attribute.
+
+
+
+(*4. master secret key*)
+free alpha:element [private].
+
+(*5. users' private key*)
+free DA:element [private].
+free dA:element [private].
+free DB:element [private].
+free dB:element [private].
+
+(*6. session key*)
+free sessionKey:bitstring [private].
+free sessionKey':bitstring [private].
+
+(*-------Constructors, Destructors & Equations------*)
+fun identityCompose(attribute,attribute,attribute):bitstring.
+fun H2(bitstring):element.
+fun H3(element,element,element):bitstring.
+
+fun concat(element,element,element):element.
+fun pairing(element,element):element.  (*Pairing operation:e(g,g)*)
+fun Mult(element,element):element.  (*Multiplication in group: G×G*)
+fun Add(element,element):element.	 (*Addition*)
+fun Powzn(element,element):element. 	(*g^s:Powzn(g,s)*)
+fun H1(attribute):element.
+fun Attrcheck(bitstring,element,element,element,element,bitstring):element.
+fun q1(attribute):element.
+fun q2(attribute):element.
+fun Negative(element):element.
+equation forall a:element; Negative(Negative(a))=a.
+(*Event*)
+event beginUserA(bitstring).
+event endUserA(bitstring).
+event beginUserB(bitstring).
+event endUserB(bitstring).
+
+(*Queries*)
+query attacker(sessionKey).
+query attacker(sessionKey').
+query id:bitstring; inj-event (endUserA(id)) ==> inj-event(beginUserA(id)).
+query id:bitstring; inj-event (endUserB(id)) ==> inj-event(beginUserB(id)).
+
+(*Processes*)
+(*RC Processes*)
+
+let UserAReg=
+	in(Sec,(deltaA1:attribute,deltaA2:attribute,deltaA3:attribute));
+	let WA = identityCompose(deltaA1,deltaA2,deltaA3) in
+	new rA1:element;
+	new rA2:element;
+	new rA3:element;
+	let DA = concat(	Mult(Powzn(h2,q1(deltaA1)),Powzn(H1(deltaA1),rA1)),
+			Mult(Powzn(h2,q1(deltaA2)),Powzn(H1(deltaA2),rA2)),
+			Mult(Powzn(h2,q1(deltaA3)),Powzn(H1(deltaA2),rA3))	) in
+	let dA = concat(	Powzn(g,rA1),
+			Powzn(g,rA2),
+			Powzn(g,rA3)	) in 
+							
+	out(Sec,(WA,DA,dA));
+	0.
+
+let UserBReg=
+	in(Sec,(deltaB1:attribute,deltaB2:attribute,deltaB3:attribute));
+	let WB = identityCompose(deltaB1,deltaB2,deltaB3) in
+	new rB1:element;
+	new rB2:element;
+	new rB3:element;
+	let DB = concat(	Mult(Powzn(h2,q2(deltaB1)),Powzn(H1(deltaB1),rB1)),
+			Mult(Powzn(h2,q2(deltaB2)),Powzn(H1(deltaB2),rB2)),
+			Mult(Powzn(h2,q2(deltaB3)),Powzn(H1(deltaB2),rB3))	) in
+	let dB = concat(	Powzn(g,rB1),
+			Powzn(g,rB2),
+			Powzn(g,rB3)	) in 
+							
+	out(Sec,(WB,DB,dB));
+	0.
+let KGC=UserAReg | UserBReg.
+
+
+(*UserA Processes*)
+let UserA=
+	(*Registration*)
+	out(Sec,(deltaA1,deltaA2,deltaA3));
+	in(Sec,(WA:bitstring,DA:element,dA:element,MA:bitstring));
+	(*Login & Authentication*)
+	event beginUserA(WA);
+	new r1A:element;
+	new r2A:element;
+	new r3A:element;
+	new alphaA:element;
+	new betaA:element;
+	new sA:element;
+	new TA:bitstring;
+	
+	let HA = concat(	Powzn(H1(deltaA1),r1A),
+			Powzn(H1(deltaA2),r2A),
+			Powzn(H1(deltaA2),r3A)	) in
+	let	HMA= Powzn(H2(MA),sA) in
+	let sigma1A = Mult(Mult(DA,HA),HMA) in
+	let KA = Powzn(g,betaA) in 
+	let sigma2A = Powzn(h2,sA) in 
+	let sigma3A = Mult(Powzn(g,alphaA),dA) in
+	out(Pub,(WA,sigma1A,sigma2A,sigma3A,KA,TA));
+	in(Pub,(WB:bitstring,sigma1B:element,sigma2B:element,sigma3B:element,KB:element,TB:bitstring));
+	let verifyResultA = Attrcheck(WB,sigma1B,sigma2B,sigma3B,KB,TB) in
+	if(verifyResultA = W) then
+	let SK = H3(KA,KB,Powzn(KB,betaA)) in
+	event endUserA(WA)
+	else 0.
+(*UserB Processes*)
+let UserB=
+	(*Registration*)
+	out(Sec,(deltaB1,deltaB2,deltaB3));
+	in(Sec,(WB:bitstring,DB:element,dB:element,MB:bitstring));
+	(*login & Authentication*)
+	event beginUserB(WB);
+	in(Pub,(WA:bitstring,sigma1A:element,sigma2A:element,sigma3A:element,KA:element,TA:bitstring));
+	let verifyResultB = Attrcheck(WA,sigma1A,sigma2A,sigma3A,KA,TA) in
+	if(verifyResultB = W) then
+	new alphaB:element;
+	new betaB:element;    
+	new sB:element;
+	new TB:bitstring;
+	
+	
+	new r1B:element;
+	new r2B:element;
+	new r3B:element;
+	
+	
+	let HB = concat( Powzn(H1(deltaB1),r1B),
+	Powzn(H1(deltaB2),r2B),
+	Powzn(H1(deltaB2),r3B)	) in
+	let	HMB= Powzn(H2(MB),sB) in
+	let sigma1B = Mult(Mult(DB,HB),HMB) in
+	let KB = Powzn(g,betaB) in 
+	let sigma2B = Powzn(h2,sB) in 
+	let sigma3B = Mult(Powzn(g,alphaB),dB) in
+	let sessionKey' = H3(KA,KB,Powzn(KA,betaB)) in
+	out(Pub,(WB,sigma1B,sigma2B,sigma3B,KB,TB));
+	event endUserB(WB)
+	else 0.
+         
+(*Processes Replication*)
+process 
+(!UserA | !UserB | !KGC)
